@@ -14,6 +14,7 @@ import type {
   ImportBundlesParams,
   ImportBundlesResult,
   InspectBundleResult,
+  UpdateCheckResult,
   HistoryLatestForSessionsParams,
   HistoryUpdateParams,
   HistoryDeleteManyResult,
@@ -132,4 +133,8 @@ export async function extractSessionIdsFromFile(
   params: ExtractSessionIdsFromFileParams,
 ): Promise<ExtractSessionIdsResult> {
   return invoke<ExtractSessionIdsResult>("extract_session_ids_from_file", { params });
+}
+
+export async function checkUpdate(): Promise<UpdateCheckResult> {
+  return invoke<UpdateCheckResult>("check_update");
 }

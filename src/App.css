@@ -167,6 +167,32 @@
   background: rgba(180, 120, 0, 0.1);
 }
 
+/* A pill that is also clickable (use with <button class="pill ... pillBtn">). */
+button.pillBtn.pill {
+  padding: 0.1em 0.55em;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  margin-left: 8px;
+  box-shadow: none;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  background: transparent;
+}
+
+button.pillBtn.pill.ok {
+  border-color: rgba(0, 128, 0, 0.35);
+  background: rgba(0, 128, 0, 0.1);
+}
+
+button.pillBtn.pill.warn {
+  border-color: rgba(180, 120, 0, 0.35);
+  background: rgba(180, 120, 0, 0.1);
+}
+
+button.pillBtn.pill:hover {
+  border-color: rgba(57, 108, 216, 0.7);
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;

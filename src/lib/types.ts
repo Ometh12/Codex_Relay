@@ -180,6 +180,14 @@ export type ImportBundlesResult = {
   errors: ImportBundlesError[];
 };
 
+export type UpdateCheckResult = {
+  current_version: string;
+  latest_version: string;
+  has_update: boolean;
+  release_url: string;
+  published_at?: string | null;
+};
+
 export type ChangeIdParams = {
   session_id: string;
   name: string;

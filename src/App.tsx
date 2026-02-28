@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { join } from "@tauri-apps/api/path";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
@@ -28,6 +28,7 @@ import type {
   RolloutPreview,
   SessionSummary,
   TransferRecord,
+  UpdateCheckResult,
   VaultUsage,
 } from "./lib/types";
 
@@ -80,12 +81,18 @@ const PREVIEW_MAX_MESSAGES_CAP = 1000;
 const PREVIEW_LOAD_MORE_STEP = 10;
 const PREVIEW_MAX_CHARS_PER_MESSAGE_DEFAULT = 4000;
 
+const UPDATE_AUTO_CHECK_DEFAULT = true;
+// Avoid spamming GitHub API; manual check is always available.
+const UPDATE_AUTO_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
 const STORAGE_KEY_PREVIEW_MARKDOWN = "codexrelay.preview.markdown";
 // v2: reset early-stage defaults (10 / +10), while keeping future persistence.
 const STORAGE_KEY_PREVIEW_MAX_MESSAGES = "codexrelay.preview.max_messages.v2";
 const STORAGE_KEY_PREVIEW_MAX_CHARS_PER_MESSAGE =
   "codexrelay.preview.max_chars_per_message.v2";
 const STORAGE_KEY_PREVIEW_INCLUDE_META = "codexrelay.preview.include_meta.v1";
+const STORAGE_KEY_UPDATE_AUTO_CHECK = "codexrelay.update.auto_check.v1";
+const STORAGE_KEY_UPDATE_LAST_CHECKED_MS = "codexrelay.update.last_checked_ms.v1";
 
 function parseSessionIdList(input: string): string[] {
   // Extract UUID-like ids from noisy text (paths/commands/markdown etc.).
@@ -216,11 +223,23 @@ function App() {
   const [previewIncludeMeta, setPreviewIncludeMeta] = useState<boolean>(() =>
     readStorageBool(STORAGE_KEY_PREVIEW_INCLUDE_META, false),
   );
+  const [updateAutoCheck, setUpdateAutoCheck] = useState<boolean>(() =>
+    readStorageBool(STORAGE_KEY_UPDATE_AUTO_CHECK, UPDATE_AUTO_CHECK_DEFAULT),
+  );
+  const [updateLastCheckedMs, setUpdateLastCheckedMs] = useState<number>(() =>
+    readStorageInt(STORAGE_KEY_UPDATE_LAST_CHECKED_MS, 0),
+  );
+  const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
+  const [updateCheckError, setUpdateCheckError] = useState<string | null>(null);
+  const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResult | null>(
+    null,
+  );
 
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const busy = busyAction !== null;
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
+  const updateCheckBusyRef = useRef(false);
   const selectAllSessionsRef = useRef<HTMLInputElement | null>(null);
   const selectAllHistoryRef = useRef<HTMLInputElement | null>(null);
 
@@ -243,6 +262,21 @@ function App() {
   useEffect(() => {
     writeStorageBool(STORAGE_KEY_PREVIEW_INCLUDE_META, previewIncludeMeta);
   }, [previewIncludeMeta]);
+
+  useEffect(() => {
+    writeStorageBool(STORAGE_KEY_UPDATE_AUTO_CHECK, updateAutoCheck);
+  }, [updateAutoCheck]);
+
+  useEffect(() => {
+    writeStorageInt(STORAGE_KEY_UPDATE_LAST_CHECKED_MS, updateLastCheckedMs);
+  }, [updateLastCheckedMs]);
+
+  useEffect(() => {
+    if (!isTauri) return;
+    if (!updateAutoCheck) return;
+    void runCheckUpdate(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTauri, updateAutoCheck]);
 
   // Drag & Drop (bundle.zip)
   const [dragActive, setDragActive] = useState(false);
@@ -1232,6 +1266,47 @@ function App() {
     }
   }
 
+  async function runCheckUpdate(force: boolean) {
+    if (!isTauri) {
+      setUpdateCheckError("网页预览模式不支持检查更新，请在桌面版（Tauri）中使用。");
+      return;
+    }
+    if (updateCheckBusyRef.current) return;
+
+    if (!force && updateLastCheckedMs) {
+      const age = Date.now() - updateLastCheckedMs;
+      if (age >= 0 && age < UPDATE_AUTO_CHECK_INTERVAL_MS) return;
+    }
+
+    updateCheckBusyRef.current = true;
+    setUpdateCheckBusy(true);
+    setUpdateCheckError(null);
+    try {
+      const r = await api.checkUpdate();
+      setUpdateCheckResult(r);
+      setUpdateLastCheckedMs(Date.now());
+    } catch (e) {
+      setUpdateCheckError(toErrorMessage(e));
+      setUpdateLastCheckedMs(Date.now());
+    } finally {
+      updateCheckBusyRef.current = false;
+      setUpdateCheckBusy(false);
+    }
+  }
+
+  async function handleOpenUrl(url: string) {
+    setError(null);
+    try {
+      if (!isTauri) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+      await openUrl(url);
+    } catch (e) {
+      setError(toErrorMessage(e));
+    }
+  }
+
   async function handleReveal(path: string) {
     setError(null);
     try {
@@ -1304,6 +1379,16 @@ function App() {
               <>
                 <span>
                   {status.product_name} {status.version}
+                  {updateCheckResult?.has_update ? (
+                    <button
+                      type="button"
+                      className="pill warn pillBtn"
+                      title={`发现新版本：${updateCheckResult.latest_version}`}
+                      onClick={() => setTab("settings")}
+                    >
+                      有更新 {updateCheckResult.latest_version}
+                    </button>
+                  ) : null}
                 </span>
                 <span className="dot">•</span>
                 <span>
@@ -3192,6 +3277,78 @@ function App() {
                 </button>
               </div>
             </>
+          ) : null}
+
+          <h3>更新</h3>
+          <div className="row">
+            <label className="field checkbox">
+              <input
+                type="checkbox"
+                checked={updateAutoCheck}
+                onChange={(e) => setUpdateAutoCheck(e.target.checked)}
+              />
+              <span>启动时自动检查更新（每天最多一次）</span>
+            </label>
+            <button
+              type="button"
+              disabled={!isTauri || updateCheckBusy}
+              onClick={() => runCheckUpdate(true)}
+            >
+              {updateCheckBusy ? "检查中..." : "检查更新"}
+            </button>
+          </div>
+          <div className="muted small">
+            上次检查：{updateLastCheckedMs ? formatTimeMs(updateLastCheckedMs) : "-"}
+          </div>
+          {updateCheckError ? (
+            <div className="error">检查更新失败：{updateCheckError}</div>
+          ) : null}
+          {updateCheckResult ? (
+            <div className="kv">
+              <div>当前版本</div>
+              <div className="mono">{updateCheckResult.current_version}</div>
+              <div>最新版本</div>
+              <div className="mono">
+                {updateCheckResult.latest_version}{" "}
+                {updateCheckResult.has_update ? (
+                  <span className="pill warn">可更新</span>
+                ) : (
+                  <span className="pill ok">已是最新</span>
+                )}
+              </div>
+              <div>发布日期</div>
+              <div>{formatRfc3339(updateCheckResult.published_at)}</div>
+              <div>Release</div>
+              <div className="mono small">{updateCheckResult.release_url}</div>
+            </div>
+          ) : (
+            <div className="muted">提示：点击“检查更新”以获取最新版本信息。</div>
+          )}
+          {updateCheckResult ? (
+            <div className="row">
+              <button
+                type="button"
+                onClick={() => handleOpenUrl(updateCheckResult.release_url)}
+              >
+                打开 Release
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCopy("brew update && brew upgrade --cask codexrelay")}
+              >
+                复制 Homebrew 更新命令
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleCopy(
+                    "sudo xattr -dr com.apple.quarantine /Applications/CodexRelay.app",
+                  )
+                }
+              >
+                复制 macOS 放行命令
+              </button>
+            </div>
           ) : null}
 
           <h3>预览</h3>

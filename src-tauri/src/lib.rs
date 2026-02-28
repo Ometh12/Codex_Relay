@@ -9,6 +9,7 @@ mod id_extract;
 mod ops;
 mod preview;
 mod settings;
+mod update;
 mod transfers;
 mod vault;
 mod vault_usage;
@@ -374,6 +375,14 @@ async fn extract_session_ids_from_file(
         .map_err(AppError::from)
 }
 
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> AppResult<update::UpdateCheckResult> {
+    let current = app.package_info().version.to_string();
+    tauri::async_runtime::spawn_blocking(move || update::check_update(&current))
+        .await
+        .map_err(|e| AppError::internal(format!("check-update task join error: {e}")))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -398,7 +407,8 @@ pub fn run() {
             vault_usage,
             preview_rollout,
             preview_bundle,
-            extract_session_ids_from_file
+            extract_session_ids_from_file,
+            check_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

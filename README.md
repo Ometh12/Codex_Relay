@@ -63,6 +63,12 @@ brew install --cask --no-quarantine codexrelay
 
 注：Homebrew 目前会提示 `--no-quarantine` 参数已 deprecated（未来可能移除）；如果你的 brew 版本不再支持该参数，请直接安装后按上一节的方法右键“打开”或执行 `xattr` 放行。
 
+## Update (macOS)
+
+- Homebrew 安装：`brew update && brew upgrade --cask codexrelay`
+- DMG 安装：下载最新 Release 的 `.dmg`，将 App 拖到 `/Applications` 覆盖即可（如遇 Gatekeeper，按上文 `xattr` 放行）。
+- 应用内：`设置 -> 更新 -> 检查更新`（会提示最新版本并提供打开 Release 的按钮）。
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
