@@ -41,11 +41,13 @@ pub fn check_update(current_version: &str) -> AppResult<UpdateCheckResult> {
     let body = resp
         .into_string()
         .map_err(|e| AppError::io(format!("读取更新信息失败：{e}")))?;
-    let rel: GitHubLatestRelease =
-        serde_json::from_str(&body).map_err(|e| AppError::internal(format!("parse release: {e}")))?;
+    let rel: GitHubLatestRelease = serde_json::from_str(&body)
+        .map_err(|e| AppError::internal(format!("parse release: {e}")))?;
 
     if rel.draft {
-        return Err(AppError::internal("GitHub latest release 是 draft（不应发生）"));
+        return Err(AppError::internal(
+            "GitHub latest release 是 draft（不应发生）",
+        ));
     }
     if rel.prerelease {
         // `latest` normally excludes prerelease; keep guardrail anyway.
@@ -55,8 +57,10 @@ pub fn check_update(current_version: &str) -> AppResult<UpdateCheckResult> {
     }
 
     let latest_version = rel.tag_name.trim_start_matches('v').to_string();
-    let has_update = match (parse_simple_semver(&latest_version), parse_simple_semver(current_version))
-    {
+    let has_update = match (
+        parse_simple_semver(&latest_version),
+        parse_simple_semver(current_version),
+    ) {
         (Some(latest), Some(current)) => latest > current,
         _ => latest_version != current_version,
     };
@@ -78,4 +82,3 @@ fn parse_simple_semver(v: &str) -> Option<(u64, u64, u64)> {
     let c = it.next()?.parse().ok()?;
     Some((a, b, c))
 }
-

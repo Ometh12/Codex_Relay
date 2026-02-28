@@ -9,8 +9,8 @@ mod id_extract;
 mod ops;
 mod preview;
 mod settings;
-mod update;
 mod transfers;
+mod update;
 mod vault;
 mod vault_usage;
 

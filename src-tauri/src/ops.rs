@@ -341,13 +341,13 @@ pub fn export_sessions<R: tauri::Runtime>(
         }
     }
     if ids.is_empty() {
-        return Err(AppError::validation("会话ID为空")
-            .with_hint("请粘贴或输入至少一个 UUID 会话ID。"));
+        return Err(
+            AppError::validation("会话ID为空").with_hint("请粘贴或输入至少一个 UUID 会话ID。")
+        );
     }
 
     let export_dir = app_paths::download_dir().map_err(AppError::from)?;
-    fs::create_dir_all(&export_dir)
-        .map_err(|e| AppError::io(format!("create export dir: {e}")))?;
+    fs::create_dir_all(&export_dir).map_err(|e| AppError::io(format!("create export dir: {e}")))?;
 
     let mut items: Vec<ExportSessionItem> = Vec::new();
     let mut errors: Vec<ExportSessionError> = Vec::new();
@@ -356,7 +356,11 @@ pub fn export_sessions<R: tauri::Runtime>(
         let name = if ids.len() == 1 {
             params.name.clone()
         } else {
-            format!("{} [{}]", params.name, &sid.chars().take(8).collect::<String>())
+            format!(
+                "{} [{}]",
+                params.name,
+                &sid.chars().take(8).collect::<String>()
+            )
         };
         match export_session(
             app,
@@ -378,7 +382,11 @@ pub fn export_sessions<R: tauri::Runtime>(
             }),
             Err(e) => errors.push(ExportSessionError {
                 session_id: sid.clone(),
-                message: format!("{}{}", e.message, e.hint.map(|h| format!("（{}）", h)).unwrap_or_default()),
+                message: format!(
+                    "{}{}",
+                    e.message,
+                    e.hint.map(|h| format!("（{}）", h)).unwrap_or_default()
+                ),
             }),
         }
     }
@@ -876,7 +884,11 @@ pub fn import_bundles<R: tauri::Runtime>(
                 // Best-effort: include short id in name when importing multiple sessions.
                 let sid = read_manifest_session_id(&src).unwrap_or_else(|_| "".to_string());
                 let derived_name = if paths.len() > 1 && !sid.is_empty() {
-                    format!("{} [{}]", params.name, &sid.chars().take(8).collect::<String>())
+                    format!(
+                        "{} [{}]",
+                        params.name,
+                        &sid.chars().take(8).collect::<String>()
+                    )
                 } else {
                     params.name.clone()
                 };
@@ -916,9 +928,8 @@ pub fn import_bundles<R: tauri::Runtime>(
                     .map_err(AppError::from)?
                     .join("tmp_batch_import")
                     .join(uuid::Uuid::now_v7().to_string());
-                fs::create_dir_all(&tmp_root).map_err(|e| {
-                    AppError::io(format!("create tmp_batch_import dir: {e}"))
-                })?;
+                fs::create_dir_all(&tmp_root)
+                    .map_err(|e| AppError::io(format!("create tmp_batch_import dir: {e}")))?;
 
                 for (idx, entry_name) in entries.iter().enumerate() {
                     let tmp_zip = tmp_root.join(format!("inner-{idx}.zip"));
@@ -932,7 +943,11 @@ pub fn import_bundles<R: tauri::Runtime>(
 
                     let sid = read_manifest_session_id(&tmp_zip).unwrap_or_else(|_| "".to_string());
                     let derived_name = if !sid.is_empty() {
-                        format!("{} [{}]", params.name, &sid.chars().take(8).collect::<String>())
+                        format!(
+                            "{} [{}]",
+                            params.name,
+                            &sid.chars().take(8).collect::<String>()
+                        )
                     } else {
                         params.name.clone()
                     };
@@ -1450,7 +1465,10 @@ fn build_batch_bundle_filename(op: &str, name: &str) -> String {
     if file.chars().count() > MAX_CHARS {
         let extra = file.chars().count().saturating_sub(MAX_CHARS);
         let target_len = safe_name.chars().count().saturating_sub(extra + 3);
-        let safe_name = safe_name.chars().take(target_len.max(8)).collect::<String>();
+        let safe_name = safe_name
+            .chars()
+            .take(target_len.max(8))
+            .collect::<String>();
         file = format!("CodexRelay-{op}-batch-{ts}-{safe_name}.zip");
     }
     file
@@ -1524,10 +1542,8 @@ enum ZipBundleKind {
 }
 
 fn classify_zip_bundle(zip_path: &Path) -> AppResult<ZipBundleKind> {
-    let f =
-        fs::File::open(zip_path).map_err(|e| AppError::io(format!("open zip: {e}")))?;
-    let mut z =
-        zip::ZipArchive::new(f).map_err(|e| AppError::io(format!("read zip: {e}")))?;
+    let f = fs::File::open(zip_path).map_err(|e| AppError::io(format!("open zip: {e}")))?;
+    let mut z = zip::ZipArchive::new(f).map_err(|e| AppError::io(format!("read zip: {e}")))?;
 
     let has_manifest = z.by_name("manifest.json").is_ok();
     let has_rollout = z.by_name("rollout.jsonl").is_ok();
@@ -1567,7 +1583,11 @@ fn classify_zip_bundle(zip_path: &Path) -> AppResult<ZipBundleKind> {
     Ok(ZipBundleKind::Unknown)
 }
 
-fn extract_zip_entry_to_file(zip_path: &Path, entry_name: &str, out_path: &Path) -> Result<(), String> {
+fn extract_zip_entry_to_file(
+    zip_path: &Path,
+    entry_name: &str,
+    out_path: &Path,
+) -> Result<(), String> {
     const MAX_BYTES: u64 = 4 * 1024 * 1024 * 1024; // 4 GiB
     let f = fs::File::open(zip_path).map_err(|e| format!("open zip: {e}"))?;
     let mut z = zip::ZipArchive::new(f).map_err(|e| format!("read zip: {e}"))?;
@@ -1588,7 +1608,9 @@ fn extract_zip_entry_to_file(zip_path: &Path, entry_name: &str, out_path: &Path)
     let mut buf = [0u8; 1024 * 64];
     let mut total: u64 = 0;
     loop {
-        let n = entry.read(&mut buf).map_err(|e| format!("read entry: {e}"))?;
+        let n = entry
+            .read(&mut buf)
+            .map_err(|e| format!("read entry: {e}"))?;
         if n == 0 {
             break;
         }
