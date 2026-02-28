@@ -52,6 +52,15 @@ sudo xattr -dr com.apple.quarantine /Applications/CodexRelay.app
 
 GitHub Actions：见 `.github/workflows/build-bundles.yml`（支持手动触发 `workflow_dispatch`；打 tag `v*` 会自动构建并发布 GitHub Release，附带 `SHA256SUMS.txt` 校验文件）。
 
+## Install (macOS via Homebrew)
+
+提供一个 Homebrew Tap（由另一个账号维护）：`star-alp/homebrew-tap-CodexRelay`
+
+```bash
+brew tap star-alp/tap-codexrelay
+brew install --cask --no-quarantine codexrelay
+```
+
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
