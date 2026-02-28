@@ -1,0 +1,36 @@
+[package]
+name = "codexrelay"
+version = "0.1.0"
+description = "Cross-device Codex CLI session transfer manager"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "codexrelay_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+walkdir = "2"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["serde", "v7", "fast-rng"] }
+zip = "0.6"
+time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
+
+[dev-dependencies]
+# Enable Tauri's mock runtime helpers for unit tests without affecting release builds.
+tauri = { version = "2", features = ["test"] }
