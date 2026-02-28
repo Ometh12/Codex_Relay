@@ -38,7 +38,11 @@ pnpm tauri build
 
 ## macOS “已损坏，无法打开”
 
-GitHub Release 下载的未签名/未公证（notarized）的 App，在 macOS 上可能会被 Gatekeeper 拦截并提示“已损坏，无法打开”。
+结论：如果不做 Apple Developer ID 签名 + 公证（notarization），从浏览器下载的 DMG/App 很可能会被 macOS Gatekeeper 拦截并提示“已损坏，无法打开”（这是系统安全机制，并非一定是包真的坏了）。
+
+免费分发场景下，通常只能给用户提供“放行”方式：
+
+1) 右键（或按住 Control 点击）App -> “打开”（会出现额外的允许打开选项）
 
 如果你是自己使用（信任该来源），可以在把 App 拖到 `/Applications` 后执行：
 
