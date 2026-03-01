@@ -65,6 +65,12 @@ brew install --cask codexrelay
 
 ## Update (macOS)
 
+- 推荐一条命令搞定（同时兼容“之前手动拖拽 DMG 安装 / Homebrew 没有接管 / 升级失败导致 cask 记录丢失”等情况）：
+
+```bash
+brew tap star-alp/tap-codexrelay && brew update && (brew upgrade --cask codexrelay || brew install --cask --force codexrelay)
+```
+
 - 如果你是通过 Homebrew 安装（`brew list --cask codexrelay` 能查到）：
   - `brew update && brew upgrade --cask codexrelay`
 - 如果你看到 `Error: Cask 'codexrelay' is not installed.`，说明你之前不是通过 Homebrew 安装（例如手动 DMG 拖拽）：
