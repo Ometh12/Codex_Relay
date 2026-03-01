@@ -3720,9 +3720,13 @@ function App() {
               </button>
               <button
                 type="button"
-                onClick={() => handleCopy("brew update && brew upgrade --cask codexrelay")}
+                onClick={() =>
+                  handleCopy(
+                    'brew tap star-alp/tap-codexrelay && brew update && (brew upgrade --cask codexrelay || brew install --cask --force codexrelay)',
+                  )
+                }
               >
-                复制 Homebrew 更新命令
+                复制 Homebrew 安装/更新命令
               </button>
               <button
                 type="button"
@@ -3734,6 +3738,13 @@ function App() {
               >
                 复制 macOS 放行命令
               </button>
+            </div>
+          ) : null}
+          {updateCheckResult ? (
+            <div className="hint muted small">
+              提示：如果你之前是手动拖拽 DMG 安装（非 Homebrew），直接运行{" "}
+              <span className="mono">brew upgrade</span> 会提示 cask 未安装；上面的命令会在需要时自动安装并覆盖{" "}
+              <span className="mono">/Applications/CodexRelay.app</span>（不影响应用数据/存档库）。
             </div>
           ) : null}
 

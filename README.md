@@ -58,15 +58,19 @@ GitHub Actions：见 `.github/workflows/build-bundles.yml`（支持手动触发 
 
 ```bash
 brew tap star-alp/tap-codexrelay
-brew install --cask --no-quarantine codexrelay
+brew install --cask codexrelay
 ```
 
-注：Homebrew 目前会提示 `--no-quarantine` 参数已 deprecated（未来可能移除）；如果你的 brew 版本不再支持该参数，请直接安装后按上一节的方法右键“打开”或执行 `xattr` 放行。
+注：Homebrew 的 `--no-quarantine` 参数已 deprecated（未来可能移除）。如遇 Gatekeeper 拦截，请按上文右键“打开”或执行 `xattr` 放行即可。
 
 ## Update (macOS)
 
-- Homebrew 安装：`brew update && brew upgrade --cask codexrelay`
-- DMG 安装：下载最新 Release 的 `.dmg`，将 App 拖到 `/Applications` 覆盖即可（如遇 Gatekeeper，按上文 `xattr` 放行）。
+- 如果你是通过 Homebrew 安装（`brew list --cask codexrelay` 能查到）：
+  - `brew update && brew upgrade --cask codexrelay`
+- 如果你看到 `Error: Cask 'codexrelay' is not installed.`，说明你之前不是通过 Homebrew 安装（例如手动 DMG 拖拽）：
+  - 继续用 DMG 更新：下载最新 Release 的 `.dmg`，将 App 拖到 `/Applications` 覆盖即可（如遇 Gatekeeper，按上文 `xattr` 放行）。
+  - 或让 Homebrew “接管”管理（会覆盖 `/Applications/CodexRelay.app`，不影响应用数据/存档库）：
+    - `brew tap star-alp/tap-codexrelay && brew install --cask --force codexrelay`
 - 应用内：`设置 -> 更新 -> 检查更新`（会提示最新版本并提供打开 Release 的按钮）。
 
 ## Recommended IDE Setup
