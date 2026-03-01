@@ -50,6 +50,11 @@ CodexRelay 负责：
 3) 在机器 B：导入 -> 预览/确认 -> 写入
 4) 在机器 B：`codex resume <session_id>`
 
+## Download / 下载
+
+- macOS：优先用 Homebrew（见下方 Install/Update），或从 GitHub Releases 下载 DMG
+- Windows / Linux：从 GitHub Releases 下载安装包
+
 ## Dev
 
 ```bash
