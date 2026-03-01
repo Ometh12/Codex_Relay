@@ -1,17 +1,54 @@
 # CodexRelay
 
-跨设备传递/备份 Codex CLI session（`.jsonl`）的管理工具（macOS / Windows / Linux）。
+跨设备传递/备份 Codex CLI session（`.jsonl`）的桌面管理工具（macOS / Windows / Linux）。
+
+目标：让你在不同电脑/不同系统上，也能通过 `codex resume <session_id>` 继续同一个会话（通过导出/导入 session 文件实现）。
+
+注：本项目为社区工具，和 OpenAI 无官方从属关系。
 
 技术栈：Tauri v2 + React + TypeScript + SQLite（后端 Rust）。
 
+## Why / 使用场景
+
+- 多平台项目（Win / macOS / Linux）来回测试，需要把同一个 Codex 会话带到另一台机器继续解决兼容问题
+- 两台电脑协同：用微信/网盘/邮件/AirDrop 传 zip 包即可迁移会话
+- 备份：在本地建立“会话版本库”（vault + 历史记录），防止手滑覆盖/误删
+
+## How It Works / 工作方式
+
+Codex CLI 会把会话写在本地 `CODEX_HOME/sessions/**/rollout-*.jsonl`（默认常见路径：`~/.codex/`）。
+
+CodexRelay 负责：
+
+1) 扫描会话并展示列表
+2) 导出：把选中的会话打包为 zip（可合并为一个包或每会话单独包；默认导出到系统 Downloads）
+3) 导入：先解析/校验（manifest + size/sha256）并预览，再按冲突策略写入 `CODEX_HOME`
+4) 在目标机执行：`codex resume <session_id>`
+
 ## Features (MVP)
 
-- Sessions: scan `CODEX_HOME/sessions/**/rollout-*.jsonl`
-- Export: create a portable `bundle.zip` (with `manifest.json` + `rollout.jsonl`), 默认导出到系统 Downloads；支持“合并为一个 zip”或“每会话单独 zip”
-- Import: 支持多选 zip 导入；支持导入“合并导出包”（外层 zip 内含 `bundles/*.zip`）；校验 sha256/size + 冲突策略（recommended: 有冲突则改ID导入）
-- History: vault + SQLite records, manual delete
-- Restore: restore any history version back to `CODEX_HOME` (also recorded)
-- Change ID: rewrite `session_meta.payload.id` (does not touch `forked_from_id`)
+- Sessions：扫描 `CODEX_HOME/sessions/**/rollout-*.jsonl`
+- Export：
+  - 生成可传输的 `bundle.zip`（`manifest.json` + `rollout.jsonl`）
+  - 支持“合并为一个 zip”或“每会话单独 zip”，默认导出到 Downloads
+- Import：
+  - 导入前先解析/校验并预览最近消息，再决定是否写入
+  - 支持多选 zip
+  - 支持导入“合并导出包”（外层 zip 内含 `bundles/*.zip`，可选 `batch_manifest.json`）
+  - 冲突策略（recommended）：本机已存在同 `session_id` 且指纹不同 -> “改 ID 导入”（保留两条分叉都可 resume）
+- History / Vault：每次导入/导出/改ID/恢复都会存档 + 落库（SQLite）；支持收藏/标签；支持手动清理
+- Restore：把任意历史版本恢复回 `CODEX_HOME`（会记录一次恢复动作）
+- Change ID：改写 `session_meta.payload.id`（默认不改 `forked_from_id`）
+- Utilities：从 md/txt/“带噪声文本”中自动提取会话 ID（UUID）并去重
+
+相关格式说明：`docs/BUNDLE_FORMAT.md`
+
+## Quick Start / 快速上手
+
+1) 在机器 A：勾选会话 -> 导出 zip（默认在 Downloads）
+2) 把 zip 传到机器 B（微信/网盘/邮件/AirDrop 均可）
+3) 在机器 B：导入 -> 预览/确认 -> 写入
+4) 在机器 B：`codex resume <session_id>`
 
 ## Dev
 
@@ -82,3 +119,7 @@ brew tap star-alp/tap-codexrelay && brew update && (brew upgrade --cask codexrel
 ## Recommended IDE Setup
 
 - [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+
+## Keywords
+
+codex, codex-cli, session, resume, jsonl, backup, export, import, cross-device, cross-platform, tauri, rust, react, typescript, sqlite, homebrew, cask, macos, windows, linux
