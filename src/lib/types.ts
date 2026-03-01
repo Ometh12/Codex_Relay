@@ -85,6 +85,36 @@ export type InspectBundleResult = {
   local_existing?: LocalSessionInfo | null;
 };
 
+export type InspectBatchZipItem = {
+  session_id?: string | null;
+  inner_zip: string;
+  resume_cmd?: string | null;
+  name?: string | null;
+  note?: string | null;
+  created_at?: string | null;
+  rollout_sha256?: string | null;
+  rollout_size?: number | null;
+};
+
+export type InspectBatchZipResult = {
+  bundle_path: string;
+  kind: string;
+  schema_version?: number | null;
+  name?: string | null;
+  note?: string | null;
+  created_at?: string | null;
+  items: InspectBatchZipItem[];
+  warnings: string[];
+};
+
+export type PreviewBatchZipEntryParams = {
+  bundle_path: string;
+  entry_name: string;
+  max_messages?: number | null;
+  max_chars_per_message?: number | null;
+  include_meta?: boolean | null;
+};
+
 export type ExportParams = {
   session_id: string;
   name: string;

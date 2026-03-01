@@ -94,6 +94,16 @@ async fn inspect_bundle(
 }
 
 #[tauri::command]
+async fn inspect_batch_zip(
+    app: tauri::AppHandle,
+    bundle_path: String,
+) -> AppResult<ops::InspectBatchZipResult> {
+    tauri::async_runtime::spawn_blocking(move || ops::inspect_batch_zip(&app, &bundle_path))
+        .await
+        .map_err(|e| AppError::internal(format!("inspect-batch task join error: {e}")))?
+}
+
+#[tauri::command]
 async fn import_bundle(
     app: tauri::AppHandle,
     params: ops::ImportParams,
@@ -365,6 +375,16 @@ async fn preview_bundle(
 }
 
 #[tauri::command]
+async fn preview_batch_zip_entry(
+    app: tauri::AppHandle,
+    params: ops::PreviewBatchZipEntryParams,
+) -> AppResult<preview::RolloutPreview> {
+    tauri::async_runtime::spawn_blocking(move || ops::preview_batch_zip_entry(&app, params))
+        .await
+        .map_err(|e| AppError::internal(format!("preview-batch task join error: {e}")))?
+}
+
+#[tauri::command]
 async fn extract_session_ids_from_file(
     _app: tauri::AppHandle,
     params: id_extract::ExtractSessionIdsFromFileParams,
@@ -394,6 +414,7 @@ pub fn run() {
             export_bundle,
             export_sessions,
             inspect_bundle,
+            inspect_batch_zip,
             import_bundle,
             import_bundles,
             change_session_id,
@@ -407,6 +428,7 @@ pub fn run() {
             vault_usage,
             preview_rollout,
             preview_bundle,
+            preview_batch_zip_entry,
             extract_session_ids_from_file,
             check_update
         ])

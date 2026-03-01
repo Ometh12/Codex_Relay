@@ -25,6 +25,7 @@ import type {
   ImportResult,
   ImportBundlesResult,
   InspectBundleResult,
+  InspectBatchZipResult,
   RolloutPreview,
   SessionSummary,
   TransferRecord,
@@ -93,6 +94,44 @@ const STORAGE_KEY_PREVIEW_MAX_CHARS_PER_MESSAGE =
 const STORAGE_KEY_PREVIEW_INCLUDE_META = "codexrelay.preview.include_meta.v1";
 const STORAGE_KEY_UPDATE_AUTO_CHECK = "codexrelay.update.auto_check.v1";
 const STORAGE_KEY_UPDATE_LAST_CHECKED_MS = "codexrelay.update.last_checked_ms.v1";
+
+function ellipsizeMiddle(s: string, head = 44, tail = 28): string {
+  if (s.length <= head + tail + 1) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
+}
+
+function ExpandableMono({
+  value,
+  minExpandChars = 60,
+}: {
+  value?: string | null;
+  minExpandChars?: number;
+}) {
+  const s = (value ?? "").trim();
+  const [open, setOpen] = useState(false);
+  if (!s) return <span className="muted">-</span>;
+  const long = s.length >= minExpandChars;
+  const shown = !open && long ? ellipsizeMiddle(s) : s;
+  return (
+    <div className={`expandRow ${open ? "open" : ""}`}>
+      <span
+        className={`mono small expandText ${open ? "open" : "collapsed"}`}
+        title={!open && long ? s : undefined}
+      >
+        {shown}
+      </span>
+      {long ? (
+        <button
+          type="button"
+          className="miniBtn"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? "收起" : "展开"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
 
 function parseSessionIdList(input: string): string[] {
   // Extract UUID-like ids from noisy text (paths/commands/markdown etc.).
@@ -315,6 +354,8 @@ function App() {
   const [inspectResult, setInspectResult] = useState<InspectBundleResult | null>(
     null,
   );
+  const [inspectBatchResult, setInspectBatchResult] =
+    useState<InspectBatchZipResult | null>(null);
   const [importName, setImportName] = useState("");
   const [importNote, setImportNote] = useState("");
   const [importStrategy, setImportStrategy] =
@@ -329,6 +370,15 @@ function App() {
     null,
   );
   const [bundlePreviewOpen, setBundlePreviewOpen] = useState(true);
+  const [batchEntryName, setBatchEntryName] = useState<string>("");
+  const [batchEntryPreview, setBatchEntryPreview] = useState<RolloutPreview | null>(
+    null,
+  );
+  const [batchEntryPreviewBusy, setBatchEntryPreviewBusy] = useState(false);
+  const [batchEntryPreviewError, setBatchEntryPreviewError] = useState<string | null>(
+    null,
+  );
+  const [batchEntryPreviewOpen, setBatchEntryPreviewOpen] = useState(false);
   const [localExistingPreview, setLocalExistingPreview] =
     useState<RolloutPreview | null>(null);
   const [localExistingPreviewBusy, setLocalExistingPreviewBusy] = useState(false);
@@ -375,7 +425,9 @@ function App() {
   const [historyPreviewError, setHistoryPreviewError] = useState<string | null>(
     null,
   );
-  const [historyPreviewOpen, setHistoryPreviewOpen] = useState(true);
+  const [historyDetailTab, setHistoryDetailTab] = useState<"detail" | "preview">(
+    "detail",
+  );
 
   // Settings UI
   const [codexHomeOverrideInput, setCodexHomeOverrideInput] = useState("");
@@ -511,6 +563,34 @@ function App() {
       setBundlePreviewError(toErrorMessage(e));
     } finally {
       setBundlePreviewBusy(false);
+    }
+  }
+
+  async function loadBatchEntryPreview(bundlePath: string, entryName: string) {
+    setBatchEntryPreviewBusy(true);
+    setBatchEntryPreviewError(null);
+    try {
+      if (!isTauri) {
+        setBatchEntryPreview({
+          ...WEB_DEMO_PREVIEW,
+          kind: "bundle",
+          source: `${bundlePath}::${entryName}`,
+        });
+        return;
+      }
+      const p = await api.previewBatchZipEntry({
+        bundle_path: bundlePath,
+        entry_name: entryName,
+        max_messages: previewMaxMessages,
+        max_chars_per_message: previewMaxCharsPerMessage,
+        include_meta: previewIncludeMeta,
+      });
+      setBatchEntryPreview(p);
+    } catch (e) {
+      setBatchEntryPreview(null);
+      setBatchEntryPreviewError(toErrorMessage(e));
+    } finally {
+      setBatchEntryPreviewBusy(false);
     }
   }
 
@@ -828,6 +908,21 @@ function App() {
   ]);
 
   useEffect(() => {
+    setBatchEntryPreview(null);
+    setBatchEntryPreviewError(null);
+    if (!batchEntryPreviewOpen) return;
+    if (!inspectBatchResult) return;
+    if (!batchEntryName) return;
+    void loadBatchEntryPreview(inspectBatchResult.bundle_path, batchEntryName);
+  }, [
+    batchEntryPreviewOpen,
+    previewMaxMessages,
+    previewMaxCharsPerMessage,
+    inspectBatchResult?.bundle_path,
+    batchEntryName,
+  ]);
+
+  useEffect(() => {
     setLocalExistingPreview(null);
     setLocalExistingPreviewError(null);
     if (!localExistingPreviewOpen) return;
@@ -846,13 +941,13 @@ function App() {
     setHistoryPreviewError(null);
     if (tab !== "history") return;
     if (!historyDetailOpen) return;
-    if (!historyPreviewOpen) return;
+    if (historyDetailTab !== "preview") return;
     if (!selectedHistory) return;
     void loadHistoryPreview(selectedHistory);
   }, [
     tab,
     historyDetailOpen,
-    historyPreviewOpen,
+    historyDetailTab,
     previewMaxMessages,
     previewMaxCharsPerMessage,
     selectedHistory?.id,
@@ -863,33 +958,56 @@ function App() {
     return inspectResult.local_existing.sha256 !== inspectResult.manifest.rollout.sha256;
   }, [inspectResult]);
 
-  async function inspectImportBundleFromPath(path: string) {
+  async function inspectImportBundleFromPath(
+    path: string,
+    opts?: { autoAdjustImportFields?: boolean },
+  ) {
     setError(null);
     setImportBatchResult(null);
     setInspectResult(null);
-    setImportPickInfo(null);
+    setInspectBatchResult(null);
+    setBatchEntryName("");
+    setBatchEntryPreview(null);
+    setBatchEntryPreviewError(null);
+    setBatchEntryPreviewOpen(false);
     setBusyAction("inspect");
     try {
       if (!isTauri) {
         setError("网页预览模式不支持导入检查，请在桌面版（Tauri）中使用。");
         return;
       }
+      const autoAdjustImportFields = opts?.autoAdjustImportFields ?? true;
       const inspected = await api.inspectBundle(path);
       setInspectResult(inspected);
-      setImportName(`导入：${inspected.manifest.name}`);
-      setImportNote(inspected.manifest.note ?? "");
+      if (autoAdjustImportFields) {
+        setImportName(`导入：${inspected.manifest.name}`);
+        setImportNote(inspected.manifest.note ?? "");
+      }
 
       const hasConflict =
         !!inspected.local_existing &&
         inspected.local_existing.sha256 !== inspected.manifest.rollout.sha256;
-      setImportStrategy(hasConflict ? "import_as_new" : "overwrite");
+      if (autoAdjustImportFields) {
+        setImportStrategy(hasConflict ? "import_as_new" : "overwrite");
+      }
     } catch (e) {
-      // 合并包（外层 zip）不一定包含 manifest.json/rollout.jsonl，检查会失败；
-      // 这种情况下用户仍可以直接“导入”。
-      setInspectResult(null);
-      setImportPickInfo(
-        `检查失败：${toErrorMessage(e)}\n提示：如果这是合并导出包，可以直接点击“导入”批量导入。`,
-      );
+      // 合并包（外层 zip）不包含 manifest.json/rollout.jsonl，单包检查会失败；
+      // 尝试解析 batch_manifest.json 或 bundles/*.zip 列表。
+      try {
+        const batch = await api.inspectBatchZip(path);
+        setInspectBatchResult(batch);
+        if (opts?.autoAdjustImportFields ?? true) {
+          if (batch.name) setImportName(`导入：${batch.name}`);
+          if (batch.note) setImportNote(batch.note);
+          setImportStrategy("recommended");
+        }
+        setBatchEntryName(batch.items[0]?.inner_zip ?? "");
+      } catch (e2) {
+        setInspectBatchResult(null);
+        setError(
+          `检查失败：${toErrorMessage(e)}\n提示：支持的结构：单会话导出包（manifest.json + rollout.jsonl），或合并导出包（bundles/*.zip，可选 batch_manifest.json）。\n（合并包解析失败：${toErrorMessage(e2)}）`,
+        );
+      }
     } finally {
       setBusyAction(null);
     }
@@ -916,11 +1034,16 @@ function App() {
       setImportPickInfo(`已选择 ${paths.length} 个 zip。`);
       setImportBatchResult(null);
       setInspectResult(null);
+      setInspectBatchResult(null);
+      setBatchEntryName("");
+      setBatchEntryPreview(null);
+      setBatchEntryPreviewError(null);
+      setBatchEntryPreviewOpen(false);
       setImportBundlePaths(paths);
-      // Best-effort inspect when selecting a single file.
-      if (paths.length === 1) {
-        await inspectImportBundleFromPath(paths[0]);
-      }
+      // Best-effort inspect the first file so users can preview before importing.
+      await inspectImportBundleFromPath(paths[0], {
+        autoAdjustImportFields: paths.length === 1,
+      });
     } catch (e) {
       setError(toErrorMessage(e));
     }
@@ -985,10 +1108,16 @@ function App() {
     setImportPickInfo(`已选择 ${zips.length} 个 zip。`);
     setImportBatchResult(null);
     setInspectResult(null);
+    setInspectBatchResult(null);
+    setBatchEntryName("");
+    setBatchEntryPreview(null);
+    setBatchEntryPreviewError(null);
+    setBatchEntryPreviewOpen(false);
     setImportBundlePaths(zips);
-    if (zips.length === 1) {
-      await inspectImportBundleFromPath(zips[0]);
-    }
+    // Best-effort inspect the first file so users can preview before importing.
+    await inspectImportBundleFromPath(zips[0], {
+      autoAdjustImportFields: zips.length === 1,
+    });
   }
 
   async function handleExport() {
@@ -1238,6 +1367,29 @@ function App() {
       setHistoryEditError(toErrorMessage(e));
     } finally {
       setHistoryEditBusy(false);
+    }
+  }
+
+  async function handleToggleHistoryFavorite(record: TransferRecord) {
+    setError(null);
+    try {
+      if (!isTauri) {
+        setError("网页预览模式不支持收藏操作，请在桌面版（Tauri）中使用。");
+        return;
+      }
+      const updated = await api.historyUpdate({
+        id: record.id,
+        name: record.name,
+        note: record.note ?? null,
+        tags: record.tags ?? null,
+        favorite: !record.favorite,
+      });
+      setHistory((prev) => prev.map((r) => (r.id === updated.id ? updated : r)));
+      if (historySelectedId === updated.id) {
+        setHistoryEditFavorite(Boolean(updated.favorite));
+      }
+    } catch (e) {
+      setError(toErrorMessage(e));
     }
   }
 
@@ -1988,6 +2140,67 @@ function App() {
 	            <div className="previewWarn">{importPickInfo}</div>
 	          ) : null}
 
+            {importBundlePaths.length > 1 ? (
+              <div className="result">
+                <h3>已选 zip（点击可检查/预览）</h3>
+                <div className="tableWrap">
+                  <table className="table compact clickable">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>路径</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importBundlePaths.map((p, idx) => {
+                        const inspectedPath =
+                          inspectResult?.bundle_path ??
+                          inspectBatchResult?.bundle_path ??
+                          "";
+                        const active = inspectedPath && inspectedPath === p;
+                        return (
+                          <tr
+                            key={`${p}-${idx}`}
+                            className={active ? "selectedRow" : undefined}
+                            onClick={() =>
+                              void inspectImportBundleFromPath(p, {
+                                autoAdjustImportFields: false,
+                              })
+                            }
+                          >
+                            <td className="nowrap">{idx + 1}</td>
+                            <td className="mono small truncatePath" title={p}>
+                              {p}
+                            </td>
+                            <td className="nowrap">
+                              <button
+                                type="button"
+                                disabled={!isTauri || busyAction === "inspect"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void inspectImportBundleFromPath(p, {
+                                    autoAdjustImportFields: false,
+                                  });
+                                }}
+                              >
+                                {busyAction === "inspect" && active
+                                  ? "检查中..."
+                                  : "检查"}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="hint muted small">
+                  批量导入时，名称/备注/策略对本次导入中所有 zip 生效。
+                </div>
+              </div>
+            ) : null}
+
 	          {inspectResult ? (
             <div className="result">
 		              <h3>包信息</h3>
@@ -2398,6 +2611,169 @@ function App() {
 	            </div>
 	          ) : null}
 
+            {inspectBatchResult ? (
+              <div className="result">
+                <h3>合并导出包信息</h3>
+                <div className="kv">
+                  <div>类型</div>
+                  <div className="mono small">{inspectBatchResult.kind}</div>
+                  <div>名称</div>
+                  <div>{inspectBatchResult.name ?? "-"}</div>
+                  <div>备注</div>
+                  <div>{inspectBatchResult.note ?? "-"}</div>
+                  <div>创建时间</div>
+                  <div>{formatRfc3339(inspectBatchResult.created_at)}</div>
+                  <div>包含会话</div>
+                  <div>{inspectBatchResult.items.length}</div>
+                  <div>警告</div>
+                  <div>
+                    {inspectBatchResult.warnings.length ? (
+                      <span className="mono small">
+                        {inspectBatchResult.warnings.join(" / ")}
+                      </span>
+                    ) : (
+                      <span className="muted">-</span>
+                    )}
+                  </div>
+                </div>
+
+                <h3>会话列表</h3>
+                <div className="tableWrap">
+                  <table className="table compact">
+                    <thead>
+                      <tr>
+                        <th>会话ID</th>
+                        <th>名称</th>
+                        <th>时间</th>
+                        <th>SHA</th>
+                        <th>大小</th>
+                        <th>条目</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {inspectBatchResult.items.map((it, idx) => (
+                        <tr key={`${it.inner_zip}-${idx}`}>
+                          <td className="mono small nowrap" title={it.session_id ?? ""}>
+                            {it.session_id ?? "-"}
+                          </td>
+                          <td className="truncate" title={it.name ?? ""}>
+                            {it.name ?? "-"}
+                          </td>
+                          <td className="nowrap">{formatRfc3339(it.created_at)}</td>
+                          <td className="mono small nowrap" title={it.rollout_sha256 ?? ""}>
+                            {shortSha(it.rollout_sha256)}
+                          </td>
+                          <td className="nowrap">{formatBytes(it.rollout_size)}</td>
+                          <td className="mono small truncatePath" title={it.inner_zip}>
+                            {it.inner_zip}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="row sectionHeader">
+                  <h3 className="grow">预览（合并包内单会话，最近消息）</h3>
+                  <button
+                    type="button"
+                    onClick={() => setBatchEntryPreviewOpen((v) => !v)}
+                  >
+                    {batchEntryPreviewOpen ? "折叠预览" : "展开预览"}
+                  </button>
+                </div>
+                {batchEntryPreviewOpen ? (
+                  <>
+                    <div className="row">
+                      <label className="field" style={{ flex: "1 1 420px" }}>
+                        <div className="label">选择会话</div>
+                        <select
+                          value={batchEntryName}
+                          onChange={(e) => setBatchEntryName(e.target.value)}
+                        >
+                          {inspectBatchResult.items.map((it, idx) => {
+                            const label = it.session_id
+                              ? `${it.session_id}${it.name ? ` • ${it.name}` : ""}`
+                              : it.inner_zip;
+                            return (
+                              <option key={`${it.inner_zip}-${idx}`} value={it.inner_zip}>
+                                {label}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </label>
+                      <button
+                        type="button"
+                        disabled={batchEntryPreviewBusy || !batchEntryName}
+                        onClick={() =>
+                          loadBatchEntryPreview(
+                            inspectBatchResult.bundle_path,
+                            batchEntryName,
+                          )
+                        }
+                      >
+                        {batchEntryPreviewBusy ? "预览中..." : "刷新预览"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          batchEntryPreviewBusy ||
+                          previewMaxMessages >= PREVIEW_MAX_MESSAGES_CAP
+                        }
+                        onClick={() =>
+                          setPreviewMaxMessages((v) =>
+                            Math.min(
+                              PREVIEW_MAX_MESSAGES_CAP,
+                              v + PREVIEW_LOAD_MORE_STEP,
+                            ),
+                          )
+                        }
+                      >
+                        加载更多（+{PREVIEW_LOAD_MORE_STEP}）
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          batchEntryPreviewBusy ||
+                          previewMaxMessages === PREVIEW_MAX_MESSAGES_DEFAULT
+                        }
+                        onClick={() => setPreviewMaxMessages(PREVIEW_MAX_MESSAGES_DEFAULT)}
+                      >
+                        重置
+                      </button>
+                      <span className="muted small">
+                        当前显示最近 {previewMaxMessages} 条
+                      </span>
+                    </div>
+                    {batchEntryPreviewError ? (
+                      <div className="error">预览失败：{batchEntryPreviewError}</div>
+                    ) : null}
+                    {batchEntryPreview ? (
+                      <RolloutPreviewView
+                        preview={batchEntryPreview}
+                        renderMarkdown={previewRenderMarkdown}
+                      />
+                    ) : batchEntryPreviewBusy ? (
+                      <div className="muted">预览加载中...</div>
+                    ) : (
+                      <div className="muted small">
+                        自动预览最近 {previewMaxMessages} 条消息。
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="muted small">
+                    已折叠：不会加载预览内容（点击“展开”加载）。
+                  </div>
+                )}
+
+                <div className="hint muted small">
+                  （已完成检查）导入选项在下方设置。
+                </div>
+              </div>
+            ) : null}
+
 	          {importBundlePaths.length ? (
 	            <div className="result">
 	              <h3>导入选项</h3>
@@ -2706,7 +3082,7 @@ function App() {
 			                  checked={historyFavoritesOnly}
 			                  onChange={(e) => setHistoryFavoritesOnly(e.target.checked)}
 			                />
-			                <span>仅看收藏</span>
+			                <span title="提示：点击列表中的 ☆ 可收藏。">仅看收藏</span>
 			              </label>
 			              <select
 			                value={historyOpFilter}
@@ -2756,7 +3132,9 @@ function App() {
                                   }}
                                 />
                               </th>
-				                      <th>★</th>
+				                      <th className="nowrap" title="收藏（点击 ☆ / ★ 切换）">
+                                收藏
+                              </th>
 				                      <th>时间</th>
 				                      <th>操作</th>
 				                      <th>名称</th>
@@ -2796,7 +3174,19 @@ function App() {
                                   }}
                                 />
                               </td>
-		                        <td className="nowrap">{r.favorite ? "★" : ""}</td>
+		                        <td className="nowrap">
+                              <button
+                                type="button"
+                                className={r.favorite ? "starBtn active" : "starBtn"}
+                                title={r.favorite ? "取消收藏" : "收藏"}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleToggleHistoryFavorite(r);
+                                }}
+                              >
+                                {r.favorite ? "★" : "☆"}
+                              </button>
+                            </td>
 		                        <td className="nowrap">{formatRfc3339(r.created_at)}</td>
 		                        <td className="nowrap">{opZh(r.op)}</td>
 	                        <td className="truncate" title={r.name}>
@@ -2829,337 +3219,333 @@ function App() {
 		                )}
 			              </div>
 
-	              {historyDetailOpen ? (
-	              <div className="splitDetail">
-	                {selectedHistory ? (
-	                  <>
-		                    <h3>详情</h3>
-		                    <div className="kv">
-		                      <div>记录ID</div>
-		                      <div className="mono">{selectedHistory.id}</div>
-		                      <div>创建时间</div>
-		                      <div>{formatRfc3339(selectedHistory.created_at)}</div>
-		                      <div>最后编辑</div>
-		                      <div>{formatRfc3339(selectedHistory.updated_at)}</div>
-		                      <div>操作</div>
-		                      <div>{opZh(selectedHistory.op)}</div>
-		                      <div>状态</div>
-		                      <div>
-		                        <span className="pill">{statusZh(selectedHistory.status)}</span>
-		                      </div>
-		                      <div>名称</div>
-		                      <div>{selectedHistory.name}</div>
-		                      <div>备注</div>
-		                      <div>{selectedHistory.note ?? "-"}</div>
-		                      <div>标签</div>
-		                      <div>{selectedHistory.tags ?? "-"}</div>
-		                      <div>收藏</div>
-		                      <div>
-		                        {selectedHistory.favorite ? (
-		                          <span className="pill ok">★ 已收藏</span>
-		                        ) : (
-		                          <span className="muted">-</span>
-		                        )}
-		                      </div>
-		                      <div>会话ID</div>
-		                      <div className="mono">
-		                        {selectedHistory.effective_session_id ??
-		                          selectedHistory.session_id_new ??
-		                          selectedHistory.session_id_old ??
-	                          "-"}
-	                      </div>
-	                      <div>SHA256</div>
-	                      <div className="mono">
-	                        {selectedHistory.rollout_sha256 ?? "-"}
-	                      </div>
-	                      <div>存档库</div>
-	                      <div className="mono">{selectedHistory.vault_dir}</div>
-	                      <div>导出包</div>
-	                      <div className="mono">
-	                        {selectedHistory.bundle_path || "-"}
-	                      </div>
-	                      <div>本机文件</div>
-	                      <div className="mono">
-	                        {selectedHistory.local_rollout_path ?? "-"}
-	                      </div>
-	                    </div>
+		              {historyDetailOpen ? (
+		              <div className="splitDetail">
+		                {selectedHistory ? (
+		                  <>
+                        <div className="detailTabs">
+                          <button
+                            type="button"
+                            className={historyDetailTab === "detail" ? "subTab active" : "subTab"}
+                            onClick={() => setHistoryDetailTab("detail")}
+                          >
+                            详情
+                          </button>
+                          <button
+                            type="button"
+                            className={
+                              historyDetailTab === "preview" ? "subTab active" : "subTab"
+                            }
+                            onClick={() => setHistoryDetailTab("preview")}
+                          >
+                            预览
+                          </button>
+                        </div>
 
-                    <div className="row">
-	                      <button
-	                        type="button"
-                          disabled={!isTauri}
-	                        onClick={() => handleOpen(selectedHistory.vault_dir)}
-	                      >
-	                        打开存档库
-	                      </button>
-	                      {selectedHistory.bundle_path ? (
-	                        <button
-	                          type="button"
-                            disabled={!isTauri}
-	                          onClick={() => handleReveal(selectedHistory.bundle_path)}
-	                        >
-	                          显示导出包
-	                        </button>
-	                      ) : null}
-                      {(selectedHistory.effective_session_id ||
-                        selectedHistory.session_id_new ||
-                        selectedHistory.session_id_old) ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCopy(
-                              `codex resume ${
-                                selectedHistory.effective_session_id ??
-                                selectedHistory.session_id_new ??
-                                selectedHistory.session_id_old
-                              }`,
-                            )
-                          }
-	                        >
-	                          复制恢复命令
-	                        </button>
-	                      ) : null}
-		                      {selectedHistory.local_rollout_path ? (
-		                        <button
-		                          type="button"
-                              disabled={!isTauri}
-		                          onClick={() =>
-		                            handleReveal(selectedHistory.local_rollout_path!)
-		                          }
-		                        >
-		                          显示本机文件
-		                        </button>
-			                      ) : null}
-			                    </div>
+                        {historyDetailTab === "detail" ? (
+                          <>
+                            <div className="kv">
+                              <div>记录ID</div>
+                              <div className="mono">{selectedHistory.id}</div>
+                              <div>创建时间</div>
+                              <div>{formatRfc3339(selectedHistory.created_at)}</div>
+                              <div>最后编辑</div>
+                              <div>{formatRfc3339(selectedHistory.updated_at)}</div>
+                              <div>操作</div>
+                              <div>{opZh(selectedHistory.op)}</div>
+                              <div>状态</div>
+                              <div>
+                                <span className="pill">
+                                  {statusZh(selectedHistory.status)}
+                                </span>
+                              </div>
+                              <div>名称</div>
+                              <div>{selectedHistory.name}</div>
+                              <div>备注</div>
+                              <div>{selectedHistory.note ?? "-"}</div>
+                              <div>标签</div>
+                              <div>{selectedHistory.tags ?? "-"}</div>
+                              <div>收藏</div>
+                              <div className="mono small">
+                                {selectedHistory.favorite ? "★" : "-"}
+                              </div>
+                              <div>会话ID</div>
+                              <div className="mono">
+                                {selectedHistory.effective_session_id ??
+                                  selectedHistory.session_id_new ??
+                                  selectedHistory.session_id_old ??
+                                  "-"}
+                              </div>
+                              <div>SHA256</div>
+                              <ExpandableMono value={selectedHistory.rollout_sha256} />
+                              <div>存档库</div>
+                              <ExpandableMono value={selectedHistory.vault_dir} />
+                              <div>导出包</div>
+                              <ExpandableMono value={selectedHistory.bundle_path || null} />
+                              <div>本机文件</div>
+                              <ExpandableMono value={selectedHistory.local_rollout_path} />
+                            </div>
 
-		                    <h3>编辑元信息</h3>
-		                    <div className="grid">
-		                      <label className="field">
-		                        <div className="label">名称（必填）</div>
-		                        <input
-		                          value={historyEditName}
-		                          onChange={(e) => setHistoryEditName(e.target.value)}
-		                        />
-		                      </label>
-		                      <label className="field">
-		                        <div className="label">备注</div>
-		                        <input
-		                          value={historyEditNote}
-		                          onChange={(e) => setHistoryEditNote(e.target.value)}
-		                        />
-		                      </label>
-		                      <label className="field">
-		                        <div className="label">标签（用逗号分隔）</div>
-		                        <input
-		                          value={historyEditTags}
-		                          onChange={(e) => setHistoryEditTags(e.target.value)}
-		                          placeholder="例如：mac, win, bugfix"
-		                        />
-		                      </label>
-		                      <label className="field checkbox">
-		                        <input
-		                          type="checkbox"
-		                          checked={historyEditFavorite}
-		                          onChange={(e) =>
-		                            setHistoryEditFavorite(e.target.checked)
-		                          }
-		                        />
-		                        <span>收藏</span>
-		                      </label>
-		                    </div>
-		                    <div className="row">
-		                      <button
-		                        type="button"
-		                        disabled={
-		                          !isTauri || historyEditBusy || !historyEditName.trim()
-		                        }
-		                        onClick={() => handleHistorySaveMeta(selectedHistory.id)}
-		                      >
-		                        {historyEditBusy ? "保存中..." : "保存"}
-		                      </button>
-		                      <button
-		                        type="button"
-		                        disabled={historyEditBusy}
-		                        onClick={resetHistoryEditFields}
-		                      >
-		                        重置
-		                      </button>
-		                    </div>
-		                    {historyEditError ? (
-		                      <div className="error">保存失败：{historyEditError}</div>
-		                    ) : null}
+                            <div className="row">
+                              <button
+                                type="button"
+                                disabled={!isTauri}
+                                onClick={() => handleOpen(selectedHistory.vault_dir)}
+                              >
+                                打开存档库
+                              </button>
+                              {selectedHistory.bundle_path ? (
+                                <button
+                                  type="button"
+                                  disabled={!isTauri}
+                                  onClick={() => handleReveal(selectedHistory.bundle_path)}
+                                >
+                                  显示导出包
+                                </button>
+                              ) : null}
+                              {selectedHistory.effective_session_id ||
+                              selectedHistory.session_id_new ||
+                              selectedHistory.session_id_old ? (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleCopy(
+                                      `codex resume ${
+                                        selectedHistory.effective_session_id ??
+                                        selectedHistory.session_id_new ??
+                                        selectedHistory.session_id_old
+                                      }`,
+                                    )
+                                  }
+                                >
+                                  复制恢复命令
+                                </button>
+                              ) : null}
+                              {selectedHistory.local_rollout_path ? (
+                                <button
+                                  type="button"
+                                  disabled={!isTauri}
+                                  onClick={() =>
+                                    handleReveal(selectedHistory.local_rollout_path!)
+                                  }
+                                >
+                                  显示本机文件
+                                </button>
+                              ) : null}
+                            </div>
 
-				                    <div className="row sectionHeader">
-				                      <h3 className="grow">预览（存档库版本，最近消息）</h3>
-				                      <button
-				                        type="button"
-				                        onClick={() => setHistoryPreviewOpen((v) => !v)}
-				                      >
-				                        {historyPreviewOpen ? "折叠预览" : "展开预览"}
-				                      </button>
-				                    </div>
-				                    {historyPreviewOpen ? (
-				                      <>
-					                        <div className="row">
-					                          <button
-					                            type="button"
-					                            disabled={historyPreviewBusy}
-					                            onClick={() => loadHistoryPreview(selectedHistory)}
-					                          >
-					                            {historyPreviewBusy ? "预览中..." : "刷新预览"}
-					                          </button>
-					                          <button
-					                            type="button"
-					                            disabled={
-					                              historyPreviewBusy ||
-					                              previewMaxMessages >= PREVIEW_MAX_MESSAGES_CAP
-					                            }
-					                            onClick={() =>
-					                              setPreviewMaxMessages((v) =>
-					                                Math.min(
-					                                  PREVIEW_MAX_MESSAGES_CAP,
-					                                  v + PREVIEW_LOAD_MORE_STEP,
-					                                ),
-					                              )
-					                            }
-					                          >
-					                            加载更多（+{PREVIEW_LOAD_MORE_STEP}）
-					                          </button>
-					                          <button
-					                            type="button"
-					                            disabled={
-					                              historyPreviewBusy ||
-					                              previewMaxMessages === PREVIEW_MAX_MESSAGES_DEFAULT
-					                            }
-					                            onClick={() =>
-					                              setPreviewMaxMessages(PREVIEW_MAX_MESSAGES_DEFAULT)
-					                            }
-					                          >
-					                            重置
-					                          </button>
-					                          <span className="muted small">
-					                            当前显示最近 {previewMaxMessages} 条
-					                          </span>
-					                          <span className="muted small">
-					                            优先预览存档库中的会话文件（rollout），其次 bundle.zip，最后回退到本机文件。
-					                          </span>
-					                        </div>
-				                        {historyPreviewError ? (
-				                          <div className="error">
-				                            预览失败：{historyPreviewError}
-				                          </div>
-				                        ) : null}
-				                        {historyPreview ? (
-				                          <RolloutPreviewView
-				                            preview={historyPreview}
-				                            renderMarkdown={previewRenderMarkdown}
-				                          />
-				                        ) : historyPreviewBusy ? (
-				                          <div className="muted">预览加载中...</div>
-				                        ) : (
-				                          <div className="muted small">
-				                            自动预览最近 {previewMaxMessages} 条消息。
-				                          </div>
-				                        )}
-				                      </>
-				                    ) : (
-				                      <div className="muted small">
-				                        已折叠：不会加载预览内容（点击“展开”加载）。
-				                      </div>
-				                    )}
+                            <h3>编辑元信息</h3>
+                            <div className="grid">
+                              <label className="field">
+                                <div className="label">名称（必填）</div>
+                                <input
+                                  value={historyEditName}
+                                  onChange={(e) => setHistoryEditName(e.target.value)}
+                                />
+                              </label>
+                              <label className="field">
+                                <div className="label">备注</div>
+                                <input
+                                  value={historyEditNote}
+                                  onChange={(e) => setHistoryEditNote(e.target.value)}
+                                />
+                              </label>
+                              <label className="field">
+                                <div className="label">标签（用逗号分隔）</div>
+                                <input
+                                  value={historyEditTags}
+                                  onChange={(e) => setHistoryEditTags(e.target.value)}
+                                  placeholder="例如：mac, win, bugfix"
+                                />
+                              </label>
+                              <label className="field checkbox">
+                                <input
+                                  type="checkbox"
+                                  checked={historyEditFavorite}
+                                  onChange={(e) => setHistoryEditFavorite(e.target.checked)}
+                                />
+                                <span>收藏</span>
+                              </label>
+                            </div>
+                            <div className="row">
+                              <button
+                                type="button"
+                                disabled={
+                                  !isTauri || historyEditBusy || !historyEditName.trim()
+                                }
+                                onClick={() => handleHistorySaveMeta(selectedHistory.id)}
+                              >
+                                {historyEditBusy ? "保存中..." : "保存"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={historyEditBusy}
+                                onClick={resetHistoryEditFields}
+                              >
+                                重置
+                              </button>
+                            </div>
+                            {historyEditError ? (
+                              <div className="error">保存失败：{historyEditError}</div>
+                            ) : null}
 
-		                    <h3>恢复</h3>
-		                    <div className="grid">
-		                      <label className="field">
-		                        <div className="label">名称（必填）</div>
-	                        <input
-	                          value={restoreName}
-	                          onChange={(e) => setRestoreName(e.target.value)}
-	                        />
-	                      </label>
-	                      <label className="field">
-	                        <div className="label">备注</div>
-	                        <input
-	                          value={restoreNote}
-	                          onChange={(e) => setRestoreNote(e.target.value)}
-	                        />
-	                      </label>
-	                      <label className="field">
-	                        <div className="label">冲突策略</div>
-	                        <select
-	                          value={restoreStrategy}
-	                          onChange={(e) =>
-	                            setRestoreStrategy(e.target.value as ConflictStrategy)
-	                          }
-	                        >
-	                          <option value="recommended">推荐</option>
-	                          <option value="import_as_new">改ID导入（新会话）</option>
-	                          <option value="overwrite">覆盖本机</option>
-	                          <option value="cancel">取消</option>
-	                        </select>
-	                      </label>
-	                    </div>
-	                    <div className="row">
-	                      <button
-                        type="button"
-	                        disabled={!isTauri || busy || !restoreName.trim()}
-	                        onClick={() => handleRestoreFromHistory(selectedHistory.id)}
-	                      >
-	                        {busyAction === "restore" ? "恢复中..." : "恢复"}
-	                      </button>
-	                    </div>
+                            <h3>恢复</h3>
+                            <div className="grid">
+                              <label className="field">
+                                <div className="label">名称（必填）</div>
+                                <input
+                                  value={restoreName}
+                                  onChange={(e) => setRestoreName(e.target.value)}
+                                />
+                              </label>
+                              <label className="field">
+                                <div className="label">备注</div>
+                                <input
+                                  value={restoreNote}
+                                  onChange={(e) => setRestoreNote(e.target.value)}
+                                />
+                              </label>
+                              <label className="field">
+                                <div className="label">冲突策略</div>
+                                <select
+                                  value={restoreStrategy}
+                                  onChange={(e) =>
+                                    setRestoreStrategy(e.target.value as ConflictStrategy)
+                                  }
+                                >
+                                  <option value="recommended">推荐</option>
+                                  <option value="import_as_new">改ID导入（新会话）</option>
+                                  <option value="overwrite">覆盖本机</option>
+                                  <option value="cancel">取消</option>
+                                </select>
+                              </label>
+                            </div>
+                            <div className="row">
+                              <button
+                                type="button"
+                                disabled={!isTauri || busy || !restoreName.trim()}
+                                onClick={() => handleRestoreFromHistory(selectedHistory.id)}
+                              >
+                                {busyAction === "restore" ? "恢复中..." : "恢复"}
+                              </button>
+                            </div>
 
-	                    {restoreResult ? (
-	                      <div className="result">
-	                        <h3>恢复结果</h3>
-	                        <div className="kv">
-	                          <div>状态</div>
-	                          <div>
-	                            <span className="pill">{statusZh(restoreResult.status)}</span>
-	                          </div>
-	                          <div>实际会话ID</div>
-	                          <div className="mono">
-	                            {restoreResult.effective_session_id}
-	                          </div>
-	                          <div>恢复命令</div>
-	                          <div className="mono">{restoreResult.resume_cmd ?? "-"}</div>
-	                          <div>本机文件</div>
-	                          <div className="mono">
-	                            {restoreResult.local_rollout_path ?? "-"}
-	                          </div>
-	                        </div>
-	                        {restoreResult.resume_cmd ? (
-	                          <div className="row">
-	                            <button
-	                              type="button"
-	                              onClick={() => handleCopy(restoreResult.resume_cmd!)}
-	                            >
-	                              复制恢复命令
-	                            </button>
-	                          </div>
-	                        ) : null}
-	                      </div>
-	                    ) : null}
+                            {restoreResult ? (
+                              <div className="result">
+                                <h3>恢复结果</h3>
+                                <div className="kv">
+                                  <div>状态</div>
+                                  <div>
+                                    <span className="pill">
+                                      {statusZh(restoreResult.status)}
+                                    </span>
+                                  </div>
+                                  <div>实际会话ID</div>
+                                  <div className="mono">{restoreResult.effective_session_id}</div>
+                                  <div>恢复命令</div>
+                                  <div className="mono">{restoreResult.resume_cmd ?? "-"}</div>
+                                  <div>本机文件</div>
+                                  <div className="mono">{restoreResult.local_rollout_path ?? "-"}</div>
+                                </div>
+                                {restoreResult.resume_cmd ? (
+                                  <div className="row">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopy(restoreResult.resume_cmd!)}
+                                    >
+                                      复制恢复命令
+                                    </button>
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
 
-	                    <h3>删除</h3>
-		                    <label className="field checkbox">
-	                      <input
-	                        type="checkbox"
-	                        checked={historyDeleteFiles}
-                          disabled={!isTauri}
-	                        onChange={(e) => setHistoryDeleteFiles(e.target.checked)}
-		                      />
-	                      <span>同时删除存档库文件</span>
-		                    </label>
-	                    <div className="row">
-	                      <button
-                        type="button"
-	                        disabled={!isTauri || busy}
-	                        onClick={() => handleHistoryDelete(selectedHistory.id)}
-	                      >
-	                        {busyAction === "delete" ? "删除中..." : "删除记录"}
-	                      </button>
-	                    </div>
+                            <h3>删除</h3>
+                            <label className="field checkbox">
+                              <input
+                                type="checkbox"
+                                checked={historyDeleteFiles}
+                                disabled={!isTauri}
+                                onChange={(e) => setHistoryDeleteFiles(e.target.checked)}
+                              />
+                              <span>同时删除存档库文件</span>
+                            </label>
+                            <div className="row">
+                              <button
+                                type="button"
+                                disabled={!isTauri || busy}
+                                onClick={() => handleHistoryDelete(selectedHistory.id)}
+                              >
+                                {busyAction === "delete" ? "删除中..." : "删除记录"}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="row sectionHeader">
+                              <h3 className="grow">预览（存档库版本，最近消息）</h3>
+                            </div>
+                            <div className="row">
+                              <button
+                                type="button"
+                                disabled={historyPreviewBusy}
+                                onClick={() => loadHistoryPreview(selectedHistory)}
+                              >
+                                {historyPreviewBusy ? "预览中..." : "刷新预览"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  historyPreviewBusy ||
+                                  previewMaxMessages >= PREVIEW_MAX_MESSAGES_CAP
+                                }
+                                onClick={() =>
+                                  setPreviewMaxMessages((v) =>
+                                    Math.min(
+                                      PREVIEW_MAX_MESSAGES_CAP,
+                                      v + PREVIEW_LOAD_MORE_STEP,
+                                    ),
+                                  )
+                                }
+                              >
+                                加载更多（+{PREVIEW_LOAD_MORE_STEP}）
+                              </button>
+                              <button
+                                type="button"
+                                disabled={
+                                  historyPreviewBusy ||
+                                  previewMaxMessages === PREVIEW_MAX_MESSAGES_DEFAULT
+                                }
+                                onClick={() =>
+                                  setPreviewMaxMessages(PREVIEW_MAX_MESSAGES_DEFAULT)
+                                }
+                              >
+                                重置
+                              </button>
+                              <span className="muted small">
+                                当前显示最近 {previewMaxMessages} 条
+                              </span>
+                              <span className="muted small">
+                                优先预览存档库中的会话文件（rollout），其次 bundle.zip，最后回退到本机文件。
+                              </span>
+                            </div>
+                            {historyPreviewError ? (
+                              <div className="error">预览失败：{historyPreviewError}</div>
+                            ) : null}
+                            {historyPreview ? (
+                              <RolloutPreviewView
+                                preview={historyPreview}
+                                renderMarkdown={previewRenderMarkdown}
+                              />
+                            ) : historyPreviewBusy ? (
+                              <div className="muted">预览加载中...</div>
+                            ) : (
+                              <div className="muted small">
+                                自动预览最近 {previewMaxMessages} 条消息。
+                              </div>
+                            )}
+                          </>
+                        )}
 	                  </>
 	                ) : (
 	                  <div className="muted">请选择一条记录。</div>

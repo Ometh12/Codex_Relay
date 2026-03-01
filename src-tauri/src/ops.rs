@@ -99,6 +99,39 @@ pub struct InspectBundleResult {
     pub local_existing: Option<LocalSessionInfo>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InspectBatchZipItem {
+    pub session_id: Option<String>,
+    pub inner_zip: String,
+    pub resume_cmd: Option<String>,
+    pub name: Option<String>,
+    pub note: Option<String>,
+    pub created_at: Option<String>,
+    pub rollout_sha256: Option<String>,
+    pub rollout_size: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InspectBatchZipResult {
+    pub bundle_path: String,
+    pub kind: String, // "batch"
+    pub schema_version: Option<u32>,
+    pub name: Option<String>,
+    pub note: Option<String>,
+    pub created_at: Option<String>,
+    pub items: Vec<InspectBatchZipItem>,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PreviewBatchZipEntryParams {
+    pub bundle_path: String,
+    pub entry_name: String,
+    pub max_messages: Option<usize>,
+    pub max_chars_per_message: Option<usize>,
+    pub include_meta: Option<bool>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConflictStrategy {
@@ -443,6 +476,11 @@ pub fn export_sessions<R: tauri::Runtime>(
                     session_id: String,
                     inner_zip: String,
                     resume_cmd: String,
+                    name: String,
+                    note: Option<String>,
+                    created_at: String,
+                    rollout_sha256: String,
+                    rollout_size: i64,
                 }
 
                 #[derive(Serialize)]
@@ -468,6 +506,11 @@ pub fn export_sessions<R: tauri::Runtime>(
                             session_id: it.session_id.clone(),
                             inner_zip: format!("bundles/{}.zip", it.session_id),
                             resume_cmd: it.resume_cmd.clone(),
+                            name: it.manifest.name.clone(),
+                            note: it.manifest.note.clone(),
+                            created_at: it.manifest.created_at.clone(),
+                            rollout_sha256: it.manifest.rollout.sha256.clone(),
+                            rollout_size: it.manifest.rollout.size,
                         })
                         .collect(),
                 };
@@ -571,6 +614,202 @@ pub fn inspect_bundle<R: tauri::Runtime>(
             local_existing,
         })
     })
+}
+
+pub fn inspect_batch_zip<R: tauri::Runtime>(
+    _app: &tauri::AppHandle<R>,
+    bundle_path: &str,
+) -> AppResult<InspectBatchZipResult> {
+    let zip_path = PathBuf::from(bundle_path);
+    if !zip_path.exists() {
+        return Err(AppError::not_found("zip 文件不存在").with_hint("请重新选择 zip 文件。"));
+    }
+
+    let kind = classify_zip_bundle(&zip_path)?;
+    let entries = match kind {
+        ZipBundleKind::BatchZip { entries } => entries,
+        ZipBundleKind::SingleBundle => {
+            return Err(
+                AppError::validation("该 zip 是单会话导出包（非合并包）").with_hint(
+                    "请直接使用“包信息”中的检查/预览，或选择合并导出包（包含 bundles/*.zip）。",
+                ),
+            );
+        }
+        ZipBundleKind::Unknown => {
+            return Err(AppError::validation("无法识别该 zip 的结构")
+                .with_hint("支持：单会话导出包（manifest.json + rollout.jsonl），或合并导出包（bundles/*.zip）。"));
+        }
+    };
+
+    let mut warnings: Vec<String> = Vec::new();
+    let mut schema_version: Option<u32> = None;
+    let mut name: Option<String> = None;
+    let mut note: Option<String> = None;
+    let mut created_at: Option<String> = None;
+    let mut items: Vec<InspectBatchZipItem> = Vec::new();
+
+    let f = fs::File::open(&zip_path).map_err(|e| AppError::io(format!("open zip: {e}")))?;
+    let mut z = zip::ZipArchive::new(f).map_err(|e| AppError::io(format!("read zip: {e}")))?;
+
+    match z.by_name("batch_manifest.json") {
+        Ok(mut mf) => {
+            const MAX_BYTES: u64 = 5 * 1024 * 1024; // 5 MiB
+            if mf.size() > MAX_BYTES {
+                warnings.push("batch_manifest.json 过大，已跳过解析。".to_string());
+            } else {
+                let mut s = String::new();
+                mf.read_to_string(&mut s)
+                    .map_err(|e| AppError::io(format!("read batch_manifest.json: {e}")))?;
+                match serde_json::from_str::<serde_json::Value>(&s) {
+                    Ok(v) => {
+                        schema_version = v
+                            .get("schema_version")
+                            .and_then(|x| x.as_u64())
+                            .map(|n| n as u32);
+                        name = v
+                            .get("name")
+                            .and_then(|x| x.as_str())
+                            .map(|s| s.to_string());
+                        note = v
+                            .get("note")
+                            .and_then(|x| x.as_str())
+                            .map(|s| s.to_string());
+                        created_at = v
+                            .get("created_at")
+                            .and_then(|x| x.as_str())
+                            .map(|s| s.to_string());
+
+                        if let Some(arr) = v.get("items").and_then(|x| x.as_array()) {
+                            for it in arr {
+                                let session_id = it
+                                    .get("session_id")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s.to_string());
+                                let inner_zip = it
+                                    .get("inner_zip")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s.to_string())
+                                    .or_else(|| {
+                                        session_id
+                                            .as_deref()
+                                            .map(|sid| format!("bundles/{sid}.zip"))
+                                    })
+                                    .unwrap_or_else(|| "bundles/unknown.zip".to_string());
+                                let resume_cmd = it
+                                    .get("resume_cmd")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s.to_string());
+                                let item_name = it
+                                    .get("name")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s.to_string());
+                                let item_note = it
+                                    .get("note")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s.to_string());
+                                let item_created_at = it
+                                    .get("created_at")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s.to_string());
+                                let rollout_sha256 = it
+                                    .get("rollout_sha256")
+                                    .and_then(|x| x.as_str())
+                                    .map(|s| s.to_string());
+                                let rollout_size = it.get("rollout_size").and_then(|x| x.as_i64());
+
+                                items.push(InspectBatchZipItem {
+                                    session_id,
+                                    inner_zip,
+                                    resume_cmd,
+                                    name: item_name,
+                                    note: item_note,
+                                    created_at: item_created_at,
+                                    rollout_sha256,
+                                    rollout_size,
+                                });
+                            }
+                        } else {
+                            warnings.push("batch_manifest.json 缺少 items 字段。".to_string());
+                        }
+                    }
+                    Err(e) => warnings.push(format!("batch_manifest.json 解析失败：{e}")),
+                }
+            }
+        }
+        Err(_) => {
+            warnings.push("未找到 batch_manifest.json（可能是旧版本或手动打包）。".to_string())
+        }
+    }
+
+    if items.is_empty() {
+        // Fallback: list inner zip entries only (best-effort extract session id from entry name).
+        for entry in &entries {
+            items.push(InspectBatchZipItem {
+                session_id: extract_first_session_id(entry),
+                inner_zip: entry.to_string(),
+                resume_cmd: None,
+                name: None,
+                note: None,
+                created_at: None,
+                rollout_sha256: None,
+                rollout_size: None,
+            });
+        }
+    }
+
+    Ok(InspectBatchZipResult {
+        bundle_path: zip_path.to_string_lossy().to_string(),
+        kind: "batch".to_string(),
+        schema_version,
+        name,
+        note,
+        created_at,
+        items,
+        warnings,
+    })
+}
+
+pub fn preview_batch_zip_entry<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    params: PreviewBatchZipEntryParams,
+) -> AppResult<crate::preview::RolloutPreview> {
+    if params.bundle_path.trim().is_empty() {
+        return Err(AppError::validation("bundle_path 为必填项"));
+    }
+    if params.entry_name.trim().is_empty() {
+        return Err(AppError::validation("entry_name 为必填项"));
+    }
+    let zip_path = PathBuf::from(&params.bundle_path);
+    if !zip_path.exists() {
+        return Err(AppError::not_found("zip 文件不存在").with_hint("请重新选择 zip 文件。"));
+    }
+
+    let transfer_id = uuid::Uuid::now_v7().to_string();
+    let tmp_dir = crate::app_paths::app_data_dir(app)?
+        .join("tmp_preview_entry")
+        .join(&transfer_id);
+    if tmp_dir.exists() {
+        vault::safe_remove_dir(&tmp_dir)?;
+    }
+    fs::create_dir_all(&tmp_dir).map_err(|e| AppError::io(format!("create tmp dir: {e}")))?;
+
+    let tmp_zip = tmp_dir.join("bundle.zip");
+    extract_zip_entry_to_file(&zip_path, &params.entry_name, &tmp_zip)
+        .map_err(|e| AppError::io(format!("extract inner zip: {e}")))?;
+
+    let preview = crate::preview::preview_bundle_command(
+        app,
+        crate::preview::PreviewBundleParams {
+            bundle_path: tmp_zip.to_string_lossy().to_string(),
+            max_messages: params.max_messages,
+            max_chars_per_message: params.max_chars_per_message,
+            include_meta: params.include_meta,
+        },
+    )
+    .map_err(AppError::from);
+
+    let _ = vault::safe_remove_dir(&tmp_dir);
+    preview
 }
 
 pub fn import_bundle<R: tauri::Runtime>(
@@ -1640,6 +1879,44 @@ fn read_manifest_session_id(zip_path: &Path) -> Result<String, String> {
         .map_err(|e| format!("read manifest.json: {e}"))?;
     let m: BundleManifest = serde_json::from_str(&s).map_err(|e| format!("parse manifest: {e}"))?;
     Ok(m.session_id)
+}
+
+fn extract_first_session_id(input: &str) -> Option<String> {
+    const LEN: usize = 36;
+    let bytes = input.as_bytes();
+    if bytes.len() < LEN {
+        return None;
+    }
+    let mut i: usize = 0;
+    while i + LEN <= bytes.len() {
+        if !is_uuid_hyphenated_at(bytes, i) {
+            i += 1;
+            continue;
+        }
+        let s = std::str::from_utf8(&bytes[i..i + LEN]).ok()?;
+        return Some(s.to_ascii_lowercase());
+    }
+    None
+}
+
+fn is_uuid_hyphenated_at(bytes: &[u8], i: usize) -> bool {
+    const LEN: usize = 36;
+    let s = match bytes.get(i..i + LEN) {
+        Some(s) => s,
+        None => return false,
+    };
+    if s[8] != b'-' || s[13] != b'-' || s[18] != b'-' || s[23] != b'-' {
+        return false;
+    }
+    for (idx, &b) in s.iter().enumerate() {
+        if matches!(idx, 8 | 13 | 18 | 23) {
+            continue;
+        }
+        if !b.is_ascii_hexdigit() {
+            return false;
+        }
+    }
+    true
 }
 
 fn rewrite_session_id(src: &Path, old_id: &str, new_id: &str, dst: &Path) -> Result<(), String> {

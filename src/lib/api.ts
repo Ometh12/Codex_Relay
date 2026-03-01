@@ -14,11 +14,13 @@ import type {
   ImportBundlesParams,
   ImportBundlesResult,
   InspectBundleResult,
+  InspectBatchZipResult,
   UpdateCheckResult,
   HistoryLatestForSessionsParams,
   HistoryUpdateParams,
   HistoryDeleteManyResult,
   PreviewBundleParams,
+  PreviewBatchZipEntryParams,
   PreviewRolloutParams,
   RolloutPreview,
   RestoreFromHistoryParams,
@@ -57,6 +59,12 @@ export async function inspectBundle(
   bundle_path: string,
 ): Promise<InspectBundleResult> {
   return invoke<InspectBundleResult>("inspect_bundle", { bundle_path });
+}
+
+export async function inspectBatchZip(
+  bundle_path: string,
+): Promise<InspectBatchZipResult> {
+  return invoke<InspectBatchZipResult>("inspect_batch_zip", { bundle_path });
 }
 
 export async function importBundle(params: ImportParams): Promise<ImportResult> {
@@ -123,6 +131,12 @@ export async function previewBundle(
   params: PreviewBundleParams,
 ): Promise<RolloutPreview> {
   return invoke<RolloutPreview>("preview_bundle", { params });
+}
+
+export async function previewBatchZipEntry(
+  params: PreviewBatchZipEntryParams,
+): Promise<RolloutPreview> {
+  return invoke<RolloutPreview>("preview_batch_zip_entry", { params });
 }
 
 export async function vaultUsage(limit = 200): Promise<VaultUsage> {
